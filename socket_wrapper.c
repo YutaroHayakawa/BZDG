@@ -20,11 +20,14 @@
 #include <linux/list.h>
 #include <linux/net.h>
 #include <linux/skbuff.h>
+#include <linux/inet.h>
 
 #include <asm/desc.h>
 #include <asm/uaccess.h>
 
-#include <uapi/linux/in.h>
+#include <uapi/linux/in.h> 
+
+#include <net/sock.h>
 
 #include "kmod.h"
 #include "socket_wrapper_common.h"
@@ -54,6 +57,12 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
 {
     int err;
     struct sockaddr_in addr;
+    struct sk_buff *skb = NULL;
+    struct socket *sock = NULL;
+    struct kvec vec;
+    struct msghdr msg;
+    unsigned char *dat = NULL;
+
     switch(cmd) {
         /* 
          * SOCKET_WRAPPER_CONNECT
@@ -74,24 +83,61 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             err = kernel_connect((struct socket *)filp->private_data, (struct sockaddr *)&addr, sizeof(struct sockaddr), 0);
 
             if(err != 0) {
-                KMODD("connect() failed.\n");
+                KMODD("kernel_connect() failed.\n");
                 return -EINVAL;
             }
 
             break;
+
+        case SOCKET_WRAPPER_BIND:
+            err = copy_from_user(&addr, (struct sockaddr*)data, sizeof(struct sockaddr));
+
+            if(err != 0) {
+                KMODD("Copy of sockaddr data from user space failed.\n");
+                return -EINVAL;
+            }
+
+            err = kernel_bind((struct socket *)filp->private_data, (struct sockaddr *)&addr, sizeof(struct sockaddr));
+
+            if(err != 0) {
+                KMODD("kernel_bind() failed.\n");
+                return -EINVAL;
+            }
+
+            break; 
+
+        case SOCKET_WRAPPER_SEND:
+            skb = alloc_skb(1320, GFP_KERNEL);
+            skb_reserve(skb, 100);
+            dat = skb_put(skb, 500);
+            memset(dat, 'A', 500);
+
+            memset(&vec, 0, sizeof(vec));
+            vec.iov_base = dat;
+            vec.iov_len = 500;
+
+            msg.msg_name = NULL;
+            msg.msg_namelen = 0;
+            msg.msg_control = NULL;
+            msg.msg_flags = 0;
+            sock = (struct socket *)filp->private_data;
+            sock->sk->sk_user_data = skb;
+
+            err = kernel_sendmsg(sock, &msg, &vec, 1, 0);
+            printk("%s: %d\n", __func__, err);
+            return err;
 
         default:
             KMODD("Invalid argument.\n");
             return -EINVAL;
     }
 
-
     return 0;
 }
 
 static int socket_wrapper_release(struct inode *inode, struct file *filp)
 {
-    KMODD("release");
+    sock_release((struct socket *)filp->private_data);
     return 0;
 }
 

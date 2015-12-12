@@ -5,6 +5,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <assert.h>
+#include <errno.h>
+#include <string.h>
 
 #include "../socket_wrapper_common.h"
 
@@ -17,31 +20,28 @@ void die(const char *msg) {
 
 int main() {
     int fd, err;
-    struct sockaddr_in addr;
+    struct sockaddr_in addr1;
+    struct sockaddr_in addr2;
 
     fd = open("/dev/socket_wrapper", 0, O_RDWR);
 
-    if(fd < 0) {
-        die("open()");
-    }
+    addr1.sin_family = AF_INET;
+    addr1.sin_port = htons(12345);
+    inet_aton("192.168.56.70", &(addr1.sin_addr));
 
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORTNUM);
-    err = inet_aton("192.168.56.100", &(addr.sin_addr));
+    err = ioctl(fd, SOCKET_WRAPPER_BIND, &addr1);
 
-    if(err == 0) {
-        printf("inet_aton() failed\n");
-        exit(EXIT_FAILURE);
-    }
+    addr2.sin_family = AF_INET;
+    addr2.sin_port = htons(12345);
+    inet_aton("192.168.56.102", &(addr2.sin_addr));
 
-    err = ioctl(fd, SOCKET_WRAPPER_CONNECT, &addr);
+    err = ioctl(fd, SOCKET_WRAPPER_CONNECT, &addr2);
 
-    if(err < 0) {
-        die("ioctl(SOCKET_WRAPPER_CONNECT)");
-    }
+    err = ioctl(fd, SOCKET_WRAPPER_SEND);
 
-    printf("Test succeeded\n");
+    printf("%s\n", strerror(err));
 
+    printf("Test OK!\n");
     return 0;
 }
 
