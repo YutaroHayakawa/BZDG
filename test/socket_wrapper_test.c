@@ -20,31 +20,24 @@ void die(const char *msg) {
 
 int main() {
     int fd, err;
-    struct sockaddr_in addr1;
-    struct sockaddr_in addr2;
+    struct sockaddr_in src_addr;
+    struct sockaddr_in dst_addr;
 
     fd = open("/dev/socket_wrapper", 0, O_RDWR);
 
-    addr1.sin_family = AF_INET;
-    addr1.sin_port = htons(12345);
-    inet_aton("192.168.56.70", &(addr1.sin_addr));
+    src_addr.sin_family = AF_INET;
+    src_addr.sin_port = htons(12345);
+    inet_aton("192.168.56.70", &(src_addr.sin_addr));
 
-    err = ioctl(fd, SOCKET_WRAPPER_BIND, &addr1);
+    err = ioctl(fd, SOCKET_WRAPPER_BIND, (struct sockaddr *)&src_addr);
 
-    addr2.sin_family = AF_INET;
-    addr2.sin_port = htons(12345);
-    inet_aton("192.168.56.102", &(addr2.sin_addr));
+    dst_addr.sin_family = AF_INET;
+    dst_addr.sin_port = htons(12345);
+    inet_aton("192.168.56.102", &(dst_addr.sin_addr));
 
-    err = ioctl(fd, SOCKET_WRAPPER_CONNECT, &addr2);
+    err = ioctl(fd, SOCKET_WRAPPER_CONNECT, (struct sockaddr *)&dst_addr);
 
     err = ioctl(fd, SOCKET_WRAPPER_SEND);
 
-    printf("%s\n", strerror(err));
-
-    printf("Test OK!\n");
     return 0;
 }
-
-
-
-

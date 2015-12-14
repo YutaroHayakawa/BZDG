@@ -32,12 +32,26 @@
 #include "kmod.h"
 #include "socket_wrapper_common.h"
 
-#define BZDG_BATCH_NUM 7
+struct socket_wrapper_info {
+    void *shmem;
+    struct socket *sock;
+};
+
+/*
+struct build_skb_struct {
+    void *udata;
+    struct skb_shared_info shinfo;
+};
+*/
 
 static int socket_wrapper_open(struct inode *inode, struct file *file)
 {
     int err;
     struct socket *sock;
+    struct socket_wrapper_info *info;
+
+    file->private_data = (struct socket_wrapper_info *)kmalloc(sizeof(struct socket_wrapper_info), GFP_KERNEL);
+    info = file->private_data;
 
     /* Make UDP socket */
     err = sock_create_kern(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock);
@@ -48,7 +62,41 @@ static int socket_wrapper_open(struct inode *inode, struct file *file)
     }
 
     /* Keep socket object reference in file object.*/
-    file->private_data = (struct socket *)sock;
+    info->sock = sock;
+    info->shmem = NULL;
+
+    return 0;
+}
+
+static int socket_wrapper_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+    int error;
+    u64 pa;
+    void *field;
+    size_t size;
+    unsigned int order;
+    struct socket_wrapper_info *info;
+
+    size = vma->vm_end - vma->vm_start;
+    order = get_order(size);
+    field = (void *) __get_free_pages(GFP_ATOMIC | __GFP_ZERO, order);
+    if (!field) {
+        KMODD("__get_free_pages failed");
+        return -EINVAL;
+    }
+    if ((vma->vm_start & ~PAGE_MASK) || (vma->vm_end & ~PAGE_MASK)) {
+        KMODD("vm_start = %lx vm_end = %lx", vma->vm_start, vma->vm_end);
+        return -EINVAL;
+    }
+
+    pa = virt_to_phys(field);
+    error = remap_pfn_range(vma, vma->vm_start, pa >> PAGE_SHIFT, size, vma->vm_page_prot);
+    if (error) {
+        KMODD("remap_pfn_range error");
+        return error;
+    }
+
+    info->shmem = (void *)pa;
 
     return 0;
 }
@@ -59,9 +107,17 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
     struct sockaddr_in addr;
     struct sk_buff *skb = NULL;
     struct socket *sock = NULL;
+    struct socket_wrapper_info *info = NULL;
     struct kvec vec;
     struct msghdr msg;
     unsigned char *dat = NULL;
+
+    info = filp->private_data;
+
+    if(!info) {
+        KMODD("There is no private in file structure.\n");
+        return -EINVAL;
+    }
 
     switch(cmd) {
         /* 
@@ -80,7 +136,7 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
                 return -EINVAL;
             }
 
-            err = kernel_connect((struct socket *)filp->private_data, (struct sockaddr *)&addr, sizeof(struct sockaddr), 0);
+            err = kernel_connect(info->sock, (struct sockaddr *)&addr, sizeof(struct sockaddr), 0);
 
             if(err != 0) {
                 KMODD("kernel_connect() failed.\n");
@@ -97,7 +153,7 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
                 return -EINVAL;
             }
 
-            err = kernel_bind((struct socket *)filp->private_data, (struct sockaddr *)&addr, sizeof(struct sockaddr));
+            err = kernel_bind(info->sock, (struct sockaddr *)&addr, sizeof(struct sockaddr));
 
             if(err != 0) {
                 KMODD("kernel_bind() failed.\n");
@@ -108,9 +164,8 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
 
         case SOCKET_WRAPPER_SEND:
             skb = alloc_skb(1320, GFP_KERNEL);
-            skb_reserve(skb, 100);
             dat = skb_put(skb, 500);
-            memset(dat, 'A', 500);
+            memset(dat, 'A', 400);
 
             memset(&vec, 0, sizeof(vec));
             vec.iov_base = dat;
@@ -120,11 +175,12 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             msg.msg_namelen = 0;
             msg.msg_control = NULL;
             msg.msg_flags = 0;
-            sock = (struct socket *)filp->private_data;
+
+            sock = info->sock;
             sock->sk->sk_user_data = skb;
 
-            err = kernel_sendmsg(sock, &msg, &vec, 1, 0);
-            printk("%s: %d\n", __func__, err);
+            err = kernel_sendmsg(sock, &msg, &vec, 1, 500);
+            printk("kernel_sendmsg: %d\n", err);
             return err;
 
         default:
@@ -137,13 +193,16 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
 
 static int socket_wrapper_release(struct inode *inode, struct file *filp)
 {
-    sock_release((struct socket *)filp->private_data);
+    struct socket_wrapper_info *info = filp->private_data;
+    sock_release(info->sock);
+    kfree(filp->private_data);
     return 0;
 }
 
 static struct file_operations socket_wrapper_fops = {
     .owner = THIS_MODULE,
     .open = socket_wrapper_open,
+    .mmap = socket_wrapper_mmap,
     .unlocked_ioctl = socket_wrapper_ioctl,
     .release = socket_wrapper_release,
 };
