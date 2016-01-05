@@ -27,13 +27,13 @@ int main() {
 
     src_addr.sin_family = AF_INET;
     src_addr.sin_port = htons(12345);
-    inet_aton("192.168.56.70", &(src_addr.sin_addr));
+    inet_aton("192.168.58.20", &(src_addr.sin_addr));
 
     err = ioctl(fd, SOCKET_WRAPPER_BIND, (struct sockaddr *)&src_addr);
 
     dst_addr.sin_family = AF_INET;
     dst_addr.sin_port = htons(12345);
-    inet_aton("192.168.56.102", &(dst_addr.sin_addr));
+    inet_aton("192.168.58.1", &(dst_addr.sin_addr));
 
     err = ioctl(fd, SOCKET_WRAPPER_CONNECT, (struct sockaddr *)&dst_addr);
 

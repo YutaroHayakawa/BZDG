@@ -101,6 +101,11 @@ static int socket_wrapper_mmap(struct file *filp, struct vm_area_struct *vma)
     return 0;
 }
 
+struct build_skb_struct {
+    char data[1450];
+    struct skb_shared_info shinfo;
+};
+
 long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
 {
     int err;
@@ -110,7 +115,8 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
     struct socket_wrapper_info *info = NULL;
     struct kvec vec;
     struct msghdr msg;
-    unsigned char *dat = NULL;
+    struct build_skb_struct *bskb;
+    unsigned int head_room;
 
     info = filp->private_data;
 
@@ -163,14 +169,32 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             break; 
 
         case SOCKET_WRAPPER_SEND:
-            skb = alloc_skb(1320, GFP_KERNEL);
-            dat = skb_put(skb, 500);
-            memset(dat, 'A', 400);
+            bskb = kmalloc(sizeof(struct build_skb_struct), GFP_KERNEL);
+            memset(bskb, 0, sizeof(struct build_skb_struct));
 
+            skb = build_skb(bskb, sizeof(struct build_skb_struct));
+
+            if(skb == NULL) {
+                return -EINVAL;
+            }
+
+            head_room = 100;
+
+            printk("head : %p\ndata : %p\ntail : %d\nend : %d\n", skb->head, skb->data, skb->tail, skb->end);
+
+            skb->head = skb->head + head_room;
+            skb->data = skb->data + head_room;
+            skb_reset_tail_pointer(skb);
+            /* We don't need to change end pointer. */
+
+            printk("head : %p\ndata : %p\ntail : %d\nend : %d\n", skb->head, skb->data, skb->tail, skb->end);
             memset(&vec, 0, sizeof(vec));
-            vec.iov_base = dat;
-            vec.iov_len = 500;
+            vec.iov_base = bskb->data + head_room;
+            printk("vec.iov_base: %p\n", vec.iov_base);
+            strcpy(bskb->data + head_room, "hogehoge");
+            vec.iov_len = strlen(bskb->data + head_room);
 
+            memset(&msg, 0, sizeof(msg));
             msg.msg_name = NULL;
             msg.msg_namelen = 0;
             msg.msg_control = NULL;
@@ -179,7 +203,7 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             sock = info->sock;
             sock->sk->sk_user_data = skb;
 
-            err = kernel_sendmsg(sock, &msg, &vec, 1, 500);
+            err = kernel_sendmsg(sock, &msg, &vec, 1, strlen(bskb->data + head_room));
             printk("kernel_sendmsg: %d\n", err);
             return err;
 
