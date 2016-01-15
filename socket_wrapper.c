@@ -182,17 +182,20 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
 
             printk("head : %p\ndata : %p\ntail : %d\nend : %d\n", skb->head, skb->data, skb->tail, skb->end);
 
+            /*
             skb->head = skb->head + head_room;
             skb->data = skb->data + head_room;
             skb_reset_tail_pointer(skb);
-            /* We don't need to change end pointer. */
+            */
+            skb_reserve(skb, head_room);
+            /* We don't need to change end pointer. */ 
 
             printk("head : %p\ndata : %p\ntail : %d\nend : %d\n", skb->head, skb->data, skb->tail, skb->end);
             memset(&vec, 0, sizeof(vec));
-            vec.iov_base = bskb->data + head_room;
+            vec.iov_base = skb->data;
             printk("vec.iov_base: %p\n", vec.iov_base);
-            strcpy(bskb->data + head_room, "hogehoge");
-            vec.iov_len = strlen(bskb->data + head_room);
+            memset(skb->data, 'A', 800);
+            vec.iov_len = 800;
 
             memset(&msg, 0, sizeof(msg));
             msg.msg_name = NULL;
@@ -203,7 +206,7 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             sock = info->sock;
             sock->sk->sk_user_data = skb;
 
-            err = kernel_sendmsg(sock, &msg, &vec, 1, strlen(bskb->data + head_room));
+            err = kernel_sendmsg(sock, &msg, &vec, 1, 800);
             printk("kernel_sendmsg: %d\n", err);
             return err;
 
