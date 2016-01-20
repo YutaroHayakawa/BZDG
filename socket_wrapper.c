@@ -32,18 +32,57 @@
 #include "kmod.h"
 #include "socket_wrapper_common.h"
 
+#define SOCKET_WRAPPER_HEAD_ROOM 100
+
+/*
+ * Name: build_skb_struct;
+ * Description: This memory layout is needed in build_skb function.
+ */
+struct build_skb_struct {
+    char data[SOCKET_WRAPPER_BUFFER_SIZE];
+    struct skb_shared_info shinfo;
+};
+
+/*
+ * Name: socket_wrapper_slot
+ * Description:
+ *  This struct expresses the layout of 'slot'
+ *  on shared memory. 'slot' contains data structure
+ *  needed to call sendmsg().
+ *
+ *  socket_wrapper's shared memory will be treated
+ *  as an array of this 'slot'
+ */
+struct socket_wrapper_slot {
+    struct msghdr msg;
+    struct sockaddr_in addr;
+    struct build_skb_struct bskb;
+    char msgctl_area[SOCKET_WRAPPER_OPTMEM_MAX];
+};
+
+
+/*
+ * Name: socket_wrapper_info
+ * Description: This struct manages important objects for socket_wrapper.
+ */
 struct socket_wrapper_info {
-    void *shmem;
+    struct socket_wrapper_refs *refs;
+    struct socket_wrapper_slot *shmem;
     struct socket *sock;
 };
 
 /*
-struct build_skb_struct {
-    void *udata;
-    struct skb_shared_info shinfo;
-};
-*/
-
+ * Name: socket_wrapper_open
+ * Description:
+ *  This function makes instance of socket_wrapper_info
+ *  and socket.
+ * Note:
+ *  Following members of socket_wrapper_info is NULL after
+ *  calling this function.
+ *  - refs
+ *  - shmem
+ *  please pay attention not to do NULL reference.
+ */
 static int socket_wrapper_open(struct inode *inode, struct file *file)
 {
     int err;
@@ -63,19 +102,48 @@ static int socket_wrapper_open(struct inode *inode, struct file *file)
 
     /* Keep socket object reference in file object.*/
     info->sock = sock;
+    info->refs = NULL;
     info->shmem = NULL;
 
     return 0;
 }
 
+struct socket_wrapper_refs* socket_wrapper_init_reference_struct(struct socket_wrapper_slot *shmem) {
+    int i;
+    struct socket_wrapper_refs *ret;
+
+    ret = kmalloc(sizeof(struct socket_wrapper_refs) * SOCKET_WRAPPER_BATCH_NUM, GFP_KERNEL);
+
+    if(!ret) {
+        printk("kmalloc failed\n");
+        return NULL;
+    }
+
+    for(i=0; i<SOCKET_WRAPPER_BATCH_NUM; i++) {
+        ret[i].msg = &(shmem[i].msg);
+        ret[i].addr = &(shmem[i].addr);
+        ret[i].data = shmem[i].bskb.data;
+        ret[i].msgctl_area = shmem[i].msgctl_area;
+    }
+
+    return ret;
+}
+
+/*
+ * Name: socket_wrapper_mmap
+ * Description:
+ *  This function create user kernel shared memory
+ *  and also set reference to 'slot' mapped in shared memory
+ *  to socket_wrapper_info.
+ */
 static int socket_wrapper_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-    int error;
+    int err;
     u64 pa;
     void *field;
     size_t size;
     unsigned int order;
-    struct socket_wrapper_info *info;
+    struct socket_wrapper_info *info = filp->private_data;
 
     size = vma->vm_end - vma->vm_start;
     order = get_order(size);
@@ -90,21 +158,20 @@ static int socket_wrapper_mmap(struct file *filp, struct vm_area_struct *vma)
     }
 
     pa = virt_to_phys(field);
-    error = remap_pfn_range(vma, vma->vm_start, pa >> PAGE_SHIFT, size, vma->vm_page_prot);
-    if (error) {
+    err = remap_pfn_range(vma, vma->vm_start, pa >> PAGE_SHIFT, size, vma->vm_page_prot);
+    if (err) {
         KMODD("remap_pfn_range error");
-        return error;
+        return err;
     }
 
-    info->shmem = (void *)pa;
+    info->shmem = (struct socket_wrapper_slot *)pa;
+
+    info->refs = socket_wrapper_init_reference_struct(info->shmem);
+
+    printk("info->refs <%p>\n", info->refs);
 
     return 0;
 }
-
-struct build_skb_struct {
-    char data[1450];
-    struct skb_shared_info shinfo;
-};
 
 long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
 {
@@ -136,7 +203,6 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
          */
         case SOCKET_WRAPPER_CONNECT:
             err = copy_from_user(&addr, (struct sockaddr*)data, sizeof(struct sockaddr));
-
             if(err != 0) {
                 KMODD("Copy of sockaddr data from user space failed.\n");
                 return -EINVAL;
@@ -181,7 +247,7 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             head_room = 200;
 
             printk("head : %p\ndata : %p\ntail : %d\nend : %d\nlen: %d\n", skb->head, skb->data, skb->tail, skb->end, skb->len);
-	    			printk("head room: %d\n", skb_headroom(skb));
+            printk("head room: %d\n", skb_headroom(skb));
 
             /*
             skb->head = skb->head + head_room;
@@ -192,7 +258,7 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             /* We don't need to change end pointer. */ 
 
             printk("head : %p\ndata : %p\ntail : %d\nend : %d\nlen: %d\n", skb->head, skb->data, skb->tail, skb->end, skb->len);
-	    			printk("head room: %d\n", skb_headroom(skb));
+            printk("head room: %d\n", skb_headroom(skb));
             memset(&vec, 0, sizeof(vec));
             vec.iov_base = skb_put(skb, 800);
             printk("vec.iov_base: %p\n", vec.iov_base);
@@ -200,7 +266,7 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             vec.iov_len = 800;
 
             printk("head : %p\ndata : %p\ntail : %d\nend : %d\nlen: %d\n", skb->head, skb->data, skb->tail, skb->end, skb->len);
-	    			printk("head room: %d\n", skb_headroom(skb));
+            printk("head room: %d\n", skb_headroom(skb));
             memset(&msg, 0, sizeof(msg));
             msg.msg_name = NULL;
             msg.msg_namelen = 0;
@@ -210,13 +276,23 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             sock = info->sock;
             sock->sk->sk_user_data = skb;
 
-	    			skb_get(skb);
+            skb_get(skb);
             err = kernel_sendmsg(sock, &msg, &vec, 1, 800);
 
-	    			kfree(bskb);
+            kfree(bskb);
             printk("kernel_sendmsg: %d\n", err);
-	    			printk("refcount : %d\n", atomic_read(&skb->users));
+            printk("refcount : %d\n", atomic_read(&skb->users));
             return err;
+
+        case SOCKET_WRAPPER_GET_REFS:
+            printk("data <%p>, info->refs <%p>\n", data, info->refs);
+            err = copy_to_user((struct socket_wrapper_refs *)data, info->refs,
+                     sizeof(struct socket_wrapper_refs) * SOCKET_WRAPPER_BATCH_NUM);
+
+            return err;
+
+        case SOCKET_WRAPPER_GET_SHMEM_SIZE:
+            return sizeof(struct socket_wrapper_slot) * SOCKET_WRAPPER_BATCH_NUM;
 
         default:
             KMODD("Invalid argument.\n");
@@ -259,7 +335,7 @@ static int __init socket_wrapper_module_init(void)
 static void __exit socket_wrapper_module_exit(void)
 {
     misc_deregister(&socket_wrapper_cdevsw);
-    KMODD("KMOD Unloaded");
+    KMODD("socket_wrapper unloaded");
     return;
 }
 /* -------------------------------------------------------------------- */
