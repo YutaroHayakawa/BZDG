@@ -39,5 +39,7 @@ int main() {
 
     err = ioctl(fd, SOCKET_WRAPPER_SEND);
 
+    close(fd);
+
     return 0;
 }

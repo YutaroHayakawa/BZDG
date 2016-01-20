@@ -178,9 +178,10 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
                 return -EINVAL;
             }
 
-            head_room = 100;
+            head_room = 200;
 
-            printk("head : %p\ndata : %p\ntail : %d\nend : %d\n", skb->head, skb->data, skb->tail, skb->end);
+            printk("head : %p\ndata : %p\ntail : %d\nend : %d\nlen: %d\n", skb->head, skb->data, skb->tail, skb->end, skb->len);
+	    			printk("head room: %d\n", skb_headroom(skb));
 
             /*
             skb->head = skb->head + head_room;
@@ -190,13 +191,16 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             skb_reserve(skb, head_room);
             /* We don't need to change end pointer. */ 
 
-            printk("head : %p\ndata : %p\ntail : %d\nend : %d\n", skb->head, skb->data, skb->tail, skb->end);
+            printk("head : %p\ndata : %p\ntail : %d\nend : %d\nlen: %d\n", skb->head, skb->data, skb->tail, skb->end, skb->len);
+	    			printk("head room: %d\n", skb_headroom(skb));
             memset(&vec, 0, sizeof(vec));
-            vec.iov_base = skb->data;
+            vec.iov_base = skb_put(skb, 800);
             printk("vec.iov_base: %p\n", vec.iov_base);
-            memset(skb->data, 'A', 800);
+            memset(vec.iov_base, 'A', 800);
             vec.iov_len = 800;
 
+            printk("head : %p\ndata : %p\ntail : %d\nend : %d\nlen: %d\n", skb->head, skb->data, skb->tail, skb->end, skb->len);
+	    			printk("head room: %d\n", skb_headroom(skb));
             memset(&msg, 0, sizeof(msg));
             msg.msg_name = NULL;
             msg.msg_namelen = 0;
@@ -206,8 +210,12 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             sock = info->sock;
             sock->sk->sk_user_data = skb;
 
+	    			skb_get(skb);
             err = kernel_sendmsg(sock, &msg, &vec, 1, 800);
+
+	    			kfree(bskb);
             printk("kernel_sendmsg: %d\n", err);
+	    			printk("refcount : %d\n", atomic_read(&skb->users));
             return err;
 
         default:
@@ -221,6 +229,7 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
 static int socket_wrapper_release(struct inode *inode, struct file *filp)
 {
     struct socket_wrapper_info *info = filp->private_data;
+    printk("socket_wrapper_release\n");
     sock_release(info->sock);
     kfree(filp->private_data);
     return 0;
