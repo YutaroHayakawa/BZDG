@@ -35,6 +35,12 @@ int main () {
 
     err = ioctl(fd, SOCKET_WRAPPER_BIND, (struct sockaddr *)&src_addr);
 
+    dst_addr.sin_family = AF_INET;
+    dst_addr.sin_port = htons(12345);
+    inet_aton("192.168.58.1", &(dst_addr.sin_addr));
+
+    err = ioctl(fd, SOCKET_WRAPPER_CONNECT, (struct sockaddr *)&dst_addr);
+
     /* Get shared memory */
     batch_num = ioctl(fd, SOCKET_WRAPPER_GET_BATCH_NUM);
     size = batch_num * sizeof(struct socket_wrapper_user_slot);
@@ -46,12 +52,8 @@ int main () {
 
     for(j=0; j<10; j++) {
         for(i=0; i<batch_num; i++) {
-            shmem[i].addr.sin_family = AF_INET;
-            shmem[i].addr.sin_port = htons(12345);
-            inet_aton("192.168.58.1", &(shmem[i].addr.sin_addr));
-
-            shmem[i].msg.msg_name = &(shmem[i].addr);
-            shmem[i].msg.msg_namelen = sizeof(struct sockaddr_in);
+            shmem[i].msg.msg_name = NULL;
+            shmem[i].msg.msg_namelen = 0
             shmem[i].msg.msg_control = NULL;
             shmem[i].msg.msg_flags = 0;
 

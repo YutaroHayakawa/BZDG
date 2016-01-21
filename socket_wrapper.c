@@ -256,6 +256,7 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
                 KMODD("%d", err);
 
                 socket_wrapper_reset_skb(info, skb, i);
+                info->shmem[i].is_available = 0;
             }
 
             break;
