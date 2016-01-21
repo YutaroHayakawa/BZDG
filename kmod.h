@@ -4,7 +4,7 @@
 #define KMOD_PROC_BUFLEN 4096
 
 #define KMODD(fmt, ...) \
-    printk(KERN_INFO "[%s]: "fmt"\n", __func__, ##__VA_ARGS__)
+    printk(KERN_DEBUG "[%s]: "fmt"\n", __func__, ##__VA_ARGS__)
 
 struct kmod_user {
     void *mem;

@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
 #include "socket_wrapper_common.h"
 
 void die(const char* msg) {
@@ -13,8 +16,7 @@ void die(const char* msg) {
 
 int main () {
     int fd, err, size;
-    struct socket_wrapper_slot *shmem;
-    struct socket_wrapper_refs *refs;
+    struct socket_wrapper_user_slot *shmem;
 
     fd = open("/dev/socket_wrapper", O_RDWR);
 
@@ -30,18 +32,9 @@ int main () {
 
     printf("shmem : %p\n", shmem);
 
-    refs = malloc(sizeof(struct socket_wrapper_refs) * SOCKET_WRAPPER_BATCH_NUM);
+    ioctl(fd, SOCKET_WRAPPER_DBG);
 
-    err = ioctl(fd, SOCKET_WRAPPER_GET_REFS, refs);
-
-    if(err) {
-        printf("ioctl(SOCKET_WRAPPER_GET_REFS) error: %d\n", err);
-    }
-
-    for(int i=0; i<SOCKET_WRAPPER_BATCH_NUM; i++) {
-        printf("refs[i]: msg <%p>, addr <%p>, data <%p>, msgctl_area <%p>\n",
-                refs[i].msg, refs[i].addr, refs[i].data, refs[i].msgctl_area);
-    }
+    printf("shmem : %s\n", shmem[0].data);
 
     return 0;
 }
