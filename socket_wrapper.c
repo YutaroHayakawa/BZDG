@@ -52,10 +52,12 @@ struct build_skb_struct {
  *  as an array of this 'slot'
  */
 struct socket_wrapper_slot {
+    int is_available;
     struct msghdr msg;
     struct sockaddr_in addr;
-    struct build_skb_struct bskb;
+    struct kvec vec;
     char msgctl_area[SOCKET_WRAPPER_OPTMEM_MAX];
+    struct build_skb_struct bskb;
 };
 
 
@@ -64,7 +66,6 @@ struct socket_wrapper_slot {
  * Description: This struct manages important objects for socket_wrapper.
  */
 struct socket_wrapper_info {
-    struct socket_wrapper_refs refs[SOCKET_WRAPPER_BATCH_NUM];
     struct socket_wrapper_slot *shmem;
     struct sk_buff *skbs[SOCKET_WRAPPER_BATCH_NUM];
     struct socket *sock;
@@ -101,33 +102,18 @@ static int socket_wrapper_open(struct inode *inode, struct file *file)
 
     /* Keep socket object reference in file object.*/
     info->sock = sock;
-    memset(info->refs, 0, sizeof(struct socket_wrapper_refs) * SOCKET_WRAPPER_BATCH_NUM);
     memset(info->skbs, 0, sizeof(struct sk_buff *) * SOCKET_WRAPPER_BATCH_NUM);
     info->shmem = NULL;
 
     return 0;
 }
 
-void socket_wrapper_init_reference_struct(struct socket_wrapper_info *info, int num) {
-    int i;
-
-    for(i=0; i<num; i++) {
-        info->refs[i].msg = &(info->shmem[i].msg);
-        info->refs[i].addr = &(info->shmem[i].addr);
-        info->refs[i].data = info->shmem[i].bskb.data;
-        info->refs[i].msgctl_area = info->shmem[i].msgctl_area;
-    }
-}
-
 void socket_wrapper_build_skbs(struct socket_wrapper_info *info, int num) {
     int i;
 
     for(i=0; i<num; i++) {
-        KMODD("&(info->shmem[i].bskb) <%p>", &(info->shmem[i].bskb));
         info->skbs[i] = build_skb(&(info->shmem[i].bskb), sizeof(info->shmem[i].bskb));
-        KMODD("info->skbs[i] <%p>", info->skbs[i]);
-        KMODD("info->skbs[i]->head <%p>", info->skbs[i]->head);
-        KMODD("info->skbs[i]->data <%p>", info->skbs[i]->data);
+        KMODD("info->skbs[%d] <%p>", i, info->skbs[i]);
     }
 }
 
@@ -169,11 +155,6 @@ static int socket_wrapper_mmap(struct file *filp, struct vm_area_struct *vma)
     info->shmem = (struct socket_wrapper_slot *)field;
 
     /*
-     * Create reference struct from shared memory.
-     */
-    socket_wrapper_init_reference_struct(info, SOCKET_WRAPPER_BATCH_NUM);
-
-    /*
      * Execute build_skb and get reference.
      */
     socket_wrapper_build_skbs(info, SOCKET_WRAPPER_BATCH_NUM);
@@ -181,17 +162,30 @@ static int socket_wrapper_mmap(struct file *filp, struct vm_area_struct *vma)
     return 0;
 }
 
+void socket_wrapper_reset_skb(struct socket_wrapper_info *info, struct sk_buff *skb, int index) {
+    skb_orphan(skb);
+    skb->len = 0;
+    skb->head = info->shmem[index].bskb.data+SOCKET_WRAPPER_HEAD_ROOM;
+    skb->data = info->shmem[index].bskb.data+SOCKET_WRAPPER_HEAD_ROOM;
+    skb->tail = 0;
+}
+
+void dump_slot(struct socket_wrapper_slot slot) {
+    KMODD("slot <%p>", &slot);
+    KMODD("data %s", slot.bskb.data);
+    /*
+    KMODD("msg : msg_name <%p>, msg_namelen %d, msg_iov <%p>, msg_iovlen %d", slot->msg.msg_name, slot->msg.msg_namelen, slot->msg.msg_iov, slot->msg.msg_iovlen);
+    KMODD("vec : iov_base <%p>, iov_len %d", slot->vec.iov_base, slot->vec.iov_len);
+    */
+}
+
 long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
 {
-    int err;
+    int i, err;
     struct sockaddr_in addr;
     struct sk_buff *skb = NULL;
     struct socket *sock = NULL;
     struct socket_wrapper_info *info = NULL;
-    struct kvec vec;
-    struct msghdr msg;
-    struct build_skb_struct *bskb;
-    unsigned int head_room;
 
     info = filp->private_data;
 
@@ -243,64 +237,31 @@ long socket_wrapper_ioctl(struct file *filp, u_int cmd, u_long data)
             break; 
 
         case SOCKET_WRAPPER_SEND:
-            bskb = kmalloc(sizeof(struct build_skb_struct), GFP_KERNEL);
-            memset(bskb, 0, sizeof(struct build_skb_struct));
+            for(i=0; i<SOCKET_WRAPPER_BATCH_NUM; i++) {
+                if(!info->shmem[i].is_available) {
+                    continue;
+                }
 
-            skb = build_skb(bskb, sizeof(struct build_skb_struct));
+                dump_slot(info->shmem[i]);
+                skb = info->skbs[i];
 
-            if(skb == NULL) {
-                return -EINVAL;
+                skb_reserve(skb, SOCKET_WRAPPER_HEAD_ROOM);
+                skb_put(skb, info->shmem[i].vec.iov_len);
+
+                sock = info->sock;
+                sock->sk->sk_user_data = skb;
+
+                skb_get(skb);
+                err = kernel_sendmsg(sock, &(info->shmem[i].msg), &(info->shmem[i].vec), 1, info->shmem[i].vec.iov_len);
+                KMODD("%d", err);
+
+                socket_wrapper_reset_skb(info, skb, i);
             }
 
-            head_room = 200;
+            break;
 
-            KMODD("head <%p>, data <%p>, tail %d, end %d, len: %d", skb->head, skb->data, skb->tail, skb->end, skb->len);
-            KMODD("head room %d", skb_headroom(skb));
-
-            /*
-            skb->head = skb->head + head_room;
-            skb->data = skb->data + head_room;
-            skb_reset_tail_pointer(skb);
-            */
-            skb_reserve(skb, head_room);
-            /* We don't need to change end pointer. */ 
-
-            KMODD("head <%p>, data <%p>, tail %d, end %d, len: %d", skb->head, skb->data, skb->tail, skb->end, skb->len);
-            KMODD("head room: %d", skb_headroom(skb));
-            memset(&vec, 0, sizeof(vec));
-            vec.iov_base = skb_put(skb, 800);
-            KMODD("vec.iov_base: %p", vec.iov_base);
-            memset(vec.iov_base, 'A', 800);
-            vec.iov_len = 800;
-
-            KMODD("head <%p>, data <%p>, tail %d, end %d, len: %d", skb->head, skb->data, skb->tail, skb->end, skb->len);
-            KMODD("head room: %d", skb_headroom(skb));
-            memset(&msg, 0, sizeof(msg));
-            msg.msg_name = NULL;
-            msg.msg_namelen = 0;
-            msg.msg_control = NULL;
-            msg.msg_flags = 0;
-
-            sock = info->sock;
-            sock->sk->sk_user_data = skb;
-
-            skb_get(skb);
-            err = kernel_sendmsg(sock, &msg, &vec, 1, 800);
-
-            kfree(bskb);
-            KMODD("kernel_sendmsg: %d", err);
-            KMODD("refcount : %d", atomic_read(&skb->users));
-            return err;
-
-        case SOCKET_WRAPPER_GET_REFS:
-            KMODD("data <%lx>, info->refs <%p>", data, info->refs);
-            err = copy_to_user((struct socket_wrapper_refs *)data, info->refs,
-                     sizeof(struct socket_wrapper_refs) * SOCKET_WRAPPER_BATCH_NUM);
-
-            return err;
-
-        case SOCKET_WRAPPER_GET_SHMEM_SIZE:
-            return sizeof(struct socket_wrapper_slot) * SOCKET_WRAPPER_BATCH_NUM;
+        case SOCKET_WRAPPER_GET_BATCH_NUM:
+            return SOCKET_WRAPPER_BATCH_NUM;
 
         case SOCKET_WRAPPER_DBG:
             memset(info->shmem[0].bskb.data, 0, SOCKET_WRAPPER_BUFFER_SIZE);
