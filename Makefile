@@ -1,4 +1,4 @@
-obj-m += socket_wrapper.o
+obj-m += bzdg.o
 
 all:
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
