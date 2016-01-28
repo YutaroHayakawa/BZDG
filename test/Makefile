@@ -7,4 +7,4 @@ send:
 send_connected:
 	gcc -I $(include_path) bzdg_send_test.c -o send_connected
 uapi_send:
-	gcc -I $(include_path) bzdg_uapi_send_test.c -o uapi_send
+	gcc -I $(include_path) bzdg_uapi_send_test.c -g -o uapi_send

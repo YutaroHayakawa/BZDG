@@ -67,6 +67,7 @@ struct bzdg_slot {
  */
 struct bzdg_info {
     struct bzdg_slot *shmem;
+    int shmem_size;
     struct sk_buff *skbs[BZDG_BATCH_NUM];
     struct socket *sock;
 };
@@ -85,7 +86,7 @@ struct bzdg_info {
  */
 static int bzdg_open(struct inode *inode, struct file *file)
 {
-    int err;
+    int i, err;
     struct socket *sock;
     struct bzdg_info *info;
 
@@ -102,7 +103,11 @@ static int bzdg_open(struct inode *inode, struct file *file)
 
     /* Keep socket object reference in file object.*/
     info->sock = sock;
-    memset(info->skbs, 0, sizeof(struct sk_buff *) * BZDG_BATCH_NUM);
+
+    for(i=0; i<BZDG_BATCH_NUM; i++) {
+        info->skbs[i] = NULL;
+    }
+
     info->shmem = NULL;
 
     return 0;
@@ -153,6 +158,7 @@ static int bzdg_mmap(struct file *filp, struct vm_area_struct *vma)
     }
 
     info->shmem = (struct bzdg_slot *)field;
+    info->shmem_size = size;
 
     /*
      * Execute build_skb and get reference.
@@ -164,10 +170,11 @@ static int bzdg_mmap(struct file *filp, struct vm_area_struct *vma)
 
 void bzdg_reset_skb(struct bzdg_info *info, struct sk_buff *skb, int index) {
     skb_orphan(skb);
-    skb->len = 0;
     skb->head = info->shmem[index].bskb.data+BZDG_HEAD_ROOM;
     skb->data = info->shmem[index].bskb.data+BZDG_HEAD_ROOM;
     skb->tail = 0;
+    skb->len = 0;
+    atomic_set(&(skb->users), 1);
 }
 
 void dump_slot(struct bzdg_slot slot) {
@@ -252,10 +259,12 @@ long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
                 sock->sk->sk_user_data = skb;
 
                 skb_get(skb);
-                err = kernel_sendmsg(sock, &(info->shmem[i].msg), &(info->shmem[i].vec), 1, info->shmem[i].vec.iov_len);
+                err = sock_sendmsg(sock, &(info->shmem[i].msg), info->shmem[i].vec.iov_len);
                 KMODD("%d", err);
+                KMODD("skb<%p> refcount %d", skb, atomic_read(&skb->users));
 
                 bzdg_reset_skb(info, skb, i);
+                KMODD("skb<%p> refcount %d", skb, atomic_read(&skb->users));
                 info->shmem[i].is_available = 0;
             }
 
@@ -279,10 +288,21 @@ long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
 
 static int bzdg_release(struct inode *inode, struct file *filp)
 {
+		int i;
     struct bzdg_info *info = filp->private_data;
     KMODD("bzdg_release");
-    sock_release(info->sock);
-    kfree(filp->private_data);
+
+    if(info->sock) {
+	    sock_release(info->sock);
+    }
+
+    for(i=0; i<BZDG_BATCH_NUM; i++) {
+        if(info->skbs[i]) {
+            kfree_skb(info->skbs[i]);
+        }
+    }
+	  
+    kfree(info);
     return 0;
 }
 

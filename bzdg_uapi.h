@@ -48,6 +48,11 @@ BZDG* init_bzdg(void) {
     return ret;
 }
 
+void free_bzdg(BZDG *bzdg) {
+    close(bzdg->fd);
+    free(bzdg);
+}
+
 int bzdg_get_batch_num(BZDG *bzdg) {
     return bzdg->batch_num;
 }
