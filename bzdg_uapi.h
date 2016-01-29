@@ -1,3 +1,6 @@
+#ifndef BZDG_UAPI_H
+#define BZDG_UAPI_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,3 +96,5 @@ int bzdg_connect(BZDG *bzdg, struct sockaddr *addr, socklen_t addrlen) {
 void bzdg_buffer_ready(BZDG *bzdg, int index) {
     bzdg->shmem[index].is_available = 1;
 }
+
+#endif

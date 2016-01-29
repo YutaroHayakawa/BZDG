@@ -323,7 +323,7 @@ struct miscdevice bzdg_cdevsw = {
 static int __init bzdg_module_init(void)
 {
     misc_register(&bzdg_cdevsw);
-    KMODD("bzdg loaded");
+    KMODD("bzdg loaded. batch:%d", BZDG_BATCH_NUM);
     return 0;
 }
 
