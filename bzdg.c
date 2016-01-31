@@ -94,7 +94,7 @@ static int bzdg_open(struct inode *inode, struct file *file)
     info = file->private_data;
 
     /* Make UDP socket */
-    err = sock_create_kern(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock);
+    err = sock_create_kern(&init_net, AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock);
 
     if(err) {
         KMODD("Socket create failed");
@@ -117,7 +117,7 @@ void bzdg_build_skbs(struct bzdg_info *info, int num) {
     int i;
 
     for(i=0; i<num; i++) {
-        info->skbs[i] = build_skb(&(info->shmem[i].bskb), sizeof(info->shmem[i].bskb));
+        info->skbs[i] = build_skb(&(info->shmem[i].bskb), sizeof(struct build_skb_struct));
         KMODD("info->skbs[%d] <%p>", i, info->skbs[i]);
     }
 }
@@ -170,11 +170,13 @@ static int bzdg_mmap(struct file *filp, struct vm_area_struct *vma)
 
 void bzdg_reset_skb(struct bzdg_info *info, struct sk_buff *skb, int index) {
     skb_orphan(skb);
-    skb->head = info->shmem[index].bskb.data+BZDG_HEAD_ROOM;
-    skb->data = info->shmem[index].bskb.data+BZDG_HEAD_ROOM;
+    skb->head = info->shmem[index].bskb.data;
+    skb->data = info->shmem[index].bskb.data;
     skb->tail = 0;
     skb->len = 0;
-    atomic_set(&(skb->users), 1);
+    skb_reset_transport_header(skb);
+    skb_reset_network_header(skb);
+    skb_reset_mac_header(skb);
 }
 
 void dump_slot(struct bzdg_slot slot) {
@@ -250,7 +252,12 @@ long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
                 }
 
                 dump_slot(info->shmem[i]);
+
                 skb = info->skbs[i];
+
+                if(!skb) {
+                    return -EINVAL;
+                }
 
                 skb_reserve(skb, BZDG_HEAD_ROOM);
                 skb_put(skb, info->shmem[i].vec.iov_len);
@@ -259,7 +266,7 @@ long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
                 sock->sk->sk_user_data = skb;
 
                 skb_get(skb);
-                err = sock_sendmsg(sock, &(info->shmem[i].msg), info->shmem[i].vec.iov_len);
+                err = sock_sendmsg(sock, &(info->shmem[i].msg));
                 KMODD("%d", err);
                 KMODD("skb<%p> refcount %d", skb, atomic_read(&skb->users));
 
@@ -292,17 +299,20 @@ static int bzdg_release(struct inode *inode, struct file *filp)
     struct bzdg_info *info = filp->private_data;
     KMODD("bzdg_release");
 
+    /*
+    for(i=0; i<BZDG_BATCH_NUM; i++) {
+      bzdg_kfree_skbmem(info->skbs[i]);
+    }
+    */
+
+    /*
     if(info->sock) {
 	    sock_release(info->sock);
     }
-
-    for(i=0; i<BZDG_BATCH_NUM; i++) {
-        if(info->skbs[i]) {
-            kfree_skb(info->skbs[i]);
-        }
-    }
+    */
 	  
-    kfree(info);
+    //free_pages((unsigned long) info->shmem, info->shmem_size);
+    //kfree(info);
     return 0;
 }
 

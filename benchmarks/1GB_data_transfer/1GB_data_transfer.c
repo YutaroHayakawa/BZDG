@@ -22,11 +22,12 @@ void die(const char* msg) {
 int main (int argc, char** argv) {
     int i, j, err;
     struct sockaddr_in src_addr;
-    struct msghdr *msg;
-    struct sockaddr_in *addr;
-    struct iovec *vec;
-    char *data;
-    BZDG *bzdg;
+    struct sockaddr_in dst_addr;
+    struct msghdr *msg = NULL;
+    struct sockaddr_in *addr = NULL;
+    struct iovec *vec = NULL;
+    char *data = NULL;
+    BZDG *bzdg = NULL;
 
     /* Parameters */
     int packet_size;
@@ -62,12 +63,12 @@ int main (int argc, char** argv) {
     loop_num = (1024*1024*1024)/(packet_size * batch_num);
 
     start = clock();
-    for(j=0; j<loop_num; j++) {
+    for(j=0; j<10; j++) {
         for(i=0; i<batch_num; i++) {
             addr = bzdg_get_tx_sockaddr_in(bzdg, i);
             addr->sin_family = AF_INET;
             addr->sin_port = htons(12345);
-            inet_aton("192.168.130.100", &(addr->sin_addr));
+            inet_aton("192.168.130.90", &(addr->sin_addr));
 
             msg = bzdg_get_tx_msghdr(bzdg, i);
             msg->msg_name = addr;
@@ -78,6 +79,7 @@ int main (int argc, char** argv) {
             data = bzdg_get_tx_data_buffer(bzdg, i);
             memset(data, 0, BZDG_BUFFER_SIZE - BZDG_HEAD_ROOM);
             memset(data, 'A', packet_size);
+            printf("%c\n", data[0]);
 
             vec = bzdg_get_tx_iovec(bzdg, i);
             vec->iov_base = data;
