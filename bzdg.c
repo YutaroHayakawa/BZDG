@@ -157,6 +157,8 @@ static int bzdg_mmap(struct file *filp, struct vm_area_struct *vma)
         return err;
     }
 
+    KMODD("size of shared memory : %ld", size);
+
     info->shmem = (struct bzdg_slot *)field;
     info->shmem_size = size;
 
@@ -169,23 +171,24 @@ static int bzdg_mmap(struct file *filp, struct vm_area_struct *vma)
 }
 
 void bzdg_reset_skb(struct bzdg_info *info, struct sk_buff *skb, int index) {
+    /*
     struct skb_shared_info *shinfo;
+    skb_orphan(skb);
     size_t size = sizeof(struct build_skb_struct) - SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
-    memset(skb, 0, sizeof(struct sk_buff));
-    skb->head = info->shmem[index].bskb.data;
-    skb->data = info->shmem[index].bskb.data;
+    skb->head = info->shmem[index].bskb.data + BZDG_HEAD_ROOM;
+    skb->data = info->shmem[index].bskb.data + BZDG_HEAD_ROOM;
     skb->truesize = SKB_TRUESIZE(size);
     skb_reset_tail_pointer(skb);
-    skb->end = skb->tail + size;
     skb_reset_transport_header(skb);
     skb_reset_network_header(skb);
     skb_reset_mac_header(skb);
     shinfo = skb_shinfo(skb);
-    atomic_set(&shinfo->dataref, 1);
-    atomic_set(&skb->users, 1);
     skb->head_frag = 1;
+    skb->len = 0;
     if(page_is_pfmemalloc(virt_to_head_page(info->shmem[index].bskb.data)))
         skb->pfmemalloc = 1;
+    */
+    bzdg_build_skbs(info, BZDG_BATCH_NUM);
 }
 
 void dump_slot(struct bzdg_slot slot) {
@@ -274,7 +277,7 @@ long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
                 sock = info->sock;
                 sock->sk->sk_user_data = skb;
 
-                skb_get(skb);
+                //skb_get(skb);
                 err = kernel_sendmsg(sock, &(info->shmem[i].msg), &(info->shmem[i].vec), 1, info->shmem[i].vec.iov_len);
                 KMODD("%d", err);
                 KMODD("skb<%p> refcount %d", skb, atomic_read(&skb->users));
@@ -304,22 +307,29 @@ long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
 
 static int bzdg_release(struct inode *inode, struct file *filp)
 {
-		int i;
+    int i;
     struct bzdg_info *info = filp->private_data;
     KMODD("bzdg_release");
 
     for(i=0; i<BZDG_BATCH_NUM; i++) {
-	    if(info->skbs[i]) {
-          kfree_skb(info->skbs[i]);
-	    }
+        if(info->skbs[i]) {
+            KMODD("release skb at <%p>", info->skbs[i]);
+            kfree_skb(info->skbs[i]);
+	}
     }
 
     if(info->sock) {
-	    sock_release(info->sock);
+	KMODD("release socket at <%p>", info->sock);
+	sock_release(info->sock);
     }
-	  
+
+
+    KMODD("release shared memory <%p>", info->shmem);
     free_pages((unsigned long) info->shmem, info->shmem_size);
-    kfree(info);
+
+    KMODD("release info <%p>", filp->private_data);
+    kfree((struct bzdg_info *)filp->private_data);
+
     return 0;
 }
 

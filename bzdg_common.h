@@ -1,7 +1,7 @@
 #ifndef BZDG_COMMON_H
 #define BZDG_COMMON_H
 
-#define BZDG_BATCH_NUM 4
+#define BZDG_BATCH_NUM 8
 #define BZDG_OPTMEM_MAX 64
 #define BZDG_HEAD_ROOM 200
 #define BZDG_BUFFER_SIZE 1084

@@ -52,7 +52,7 @@ int main (int argc, char** argv) {
     /* bind address to inner socket */
     src_addr.sin_family = AF_INET;
     src_addr.sin_port = htons(12345);
-    inet_aton("192.168.130.80", (struct in_addr *)&(src_addr.sin_addr));
+    inet_aton("192.168.131.90", (struct in_addr *)&(src_addr.sin_addr));
     err = bzdg_bind(bzdg, (struct sockaddr *)&(src_addr), sizeof(struct sockaddr_in));
 
     if(err) {
@@ -68,7 +68,7 @@ int main (int argc, char** argv) {
             addr = bzdg_get_tx_sockaddr_in(bzdg, i);
             addr->sin_family = AF_INET;
             addr->sin_port = htons(12345);
-            inet_aton("192.168.130.90", &(addr->sin_addr));
+            inet_aton("192.168.131.1", &(addr->sin_addr));
 
             msg = bzdg_get_tx_msghdr(bzdg, i);
             msg->msg_name = addr;
