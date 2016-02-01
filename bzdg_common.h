@@ -18,9 +18,25 @@ struct bzdg_refs {
     char *msgctl_area;
 };
 
+struct kernel_msghdr {
+    void *msg_name;
+    int msg_namelen;
+    struct kernel_iov_iter {
+        int type;
+        size_t iov_offset;
+        size_t count;
+        struct iovec *iov;
+        unsigned long nr_segs;
+    } msg_iter;
+    void *msg_control;
+    size_t msg_controllen;
+    unsigned int msg_flags;
+    struct aiocb *iocb;
+};
+
 struct bzdg_user_slot {
     int is_available;
-    struct msghdr msg;
+    struct kernel_msghdr msg;
     struct sockaddr_in addr;
     struct iovec vec;
     char msgctl_area[BZDG_OPTMEM_MAX];

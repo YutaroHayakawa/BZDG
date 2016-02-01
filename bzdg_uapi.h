@@ -60,7 +60,7 @@ int bzdg_get_batch_num(BZDG *bzdg) {
     return bzdg->batch_num;
 }
 
-struct msghdr *bzdg_get_tx_msghdr(BZDG *bzdg, int index) {
+struct kernel_msghdr *bzdg_get_tx_msghdr(BZDG *bzdg, int index) {
     return &(bzdg->shmem[index].msg);
 }
 

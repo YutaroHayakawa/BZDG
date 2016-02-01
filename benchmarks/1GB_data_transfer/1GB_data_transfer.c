@@ -23,7 +23,7 @@ int main (int argc, char** argv) {
     int i, j, err;
     struct sockaddr_in src_addr;
     struct sockaddr_in dst_addr;
-    struct msghdr *msg = NULL;
+    struct kernel_msghdr *msg = NULL;
     struct sockaddr_in *addr = NULL;
     struct iovec *vec = NULL;
     char *data = NULL;
@@ -79,14 +79,12 @@ int main (int argc, char** argv) {
             data = bzdg_get_tx_data_buffer(bzdg, i);
             memset(data, 0, BZDG_BUFFER_SIZE - BZDG_HEAD_ROOM);
             memset(data, 'A', packet_size);
-            printf("%c\n", data[0]);
 
             vec = bzdg_get_tx_iovec(bzdg, i);
             vec->iov_base = data;
             vec->iov_len = packet_size;
 
-            msg->msg_iov = vec;
-            msg->msg_iovlen = vec->iov_len;
+            msg->msg_iter.iov = vec;
 
             bzdg_buffer_ready(bzdg, i);
         }
