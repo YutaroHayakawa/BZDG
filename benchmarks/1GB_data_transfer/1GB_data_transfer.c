@@ -22,7 +22,6 @@ void die(const char* msg) {
 int main (int argc, char** argv) {
     int i, j, err;
     struct sockaddr_in src_addr;
-    struct sockaddr_in dst_addr;
     struct kernel_msghdr *msg = NULL;
     struct sockaddr_in *addr = NULL;
     struct iovec *vec = NULL;
@@ -30,13 +29,14 @@ int main (int argc, char** argv) {
     BZDG *bzdg = NULL;
 
     /* Parameters */
-    int packet_size;
-    int loop_num;
-    int batch_num;
+    int packet_size = 0;
+    int loop_num = 0;
+    int batch_num = 0;
 
-    clock_t start, end;
+    clock_t start = 0;
+    clock_t end = 0;
 
-    if(argc < 2) {
+    if(argc != 2) {
         printf("Invalid argument\n");
         exit(EXIT_FAILURE);
     }
@@ -50,6 +50,7 @@ int main (int argc, char** argv) {
     }
 
     /* bind address to inner socket */
+    memset(&src_addr, 0, sizeof(struct sockaddr_in));
     src_addr.sin_family = AF_INET;
     src_addr.sin_port = htons(12345);
     inet_aton("192.168.131.90", (struct in_addr *)&(src_addr.sin_addr));
@@ -63,30 +64,30 @@ int main (int argc, char** argv) {
     loop_num = (1024*1024*1024)/(packet_size * batch_num);
 
     start = clock();
-    for(j=0; j<10; j++) {
-        for(i=0; i<batch_num; i++) {
-            addr = bzdg_get_tx_sockaddr_in(bzdg, i);
+    for(i=0; i<loop_num; i++) {
+        for(j=0; j<batch_num; j++) {
+            addr = bzdg_get_tx_sockaddr_in(bzdg, j);
             addr->sin_family = AF_INET;
             addr->sin_port = htons(12345);
             inet_aton("192.168.131.1", &(addr->sin_addr));
 
-            msg = bzdg_get_tx_msghdr(bzdg, i);
+            msg = bzdg_get_tx_msghdr(bzdg, j);
             msg->msg_name = addr;
             msg->msg_namelen = sizeof(struct sockaddr_in);
             msg->msg_control = NULL;
             msg->msg_flags = 0;
 
-            data = bzdg_get_tx_data_buffer(bzdg, i);
-            memset(data, 0, BZDG_BUFFER_SIZE - BZDG_HEAD_ROOM);
+            data = bzdg_get_tx_data_buffer(bzdg, j);
+            memset(data, 0, BZDG_BUFFER_SIZE);
             memset(data, 'A', packet_size);
 
-            vec = bzdg_get_tx_iovec(bzdg, i);
+            vec = bzdg_get_tx_iovec(bzdg, j);
             vec->iov_base = data;
             vec->iov_len = packet_size;
 
             msg->msg_iter.iov = vec;
 
-            bzdg_buffer_ready(bzdg, i);
+            bzdg_buffer_ready(bzdg, j);
         }
         bzdg_send(bzdg);
     }

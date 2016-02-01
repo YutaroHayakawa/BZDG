@@ -3,8 +3,7 @@
 
 #define BZDG_BATCH_NUM 8
 #define BZDG_OPTMEM_MAX 64
-#define BZDG_HEAD_ROOM 200
-#define BZDG_BUFFER_SIZE 1084
+#define BZDG_BUFFER_SIZE 1500
 
 /*
  * Name: bzdg_refs
@@ -41,7 +40,6 @@ struct bzdg_user_slot {
     struct iovec vec;
     char msgctl_area[BZDG_OPTMEM_MAX];
     char data[BZDG_BUFFER_SIZE];
-    char shared_info_pad[320];
 };
 
 /* Macros needed in ioctl(2) */
