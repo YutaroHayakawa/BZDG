@@ -32,6 +32,11 @@
 #include "kmod.h"
 #include "bzdg_common.h"
 
+static int BZDG_BATCH_NUM = 8;
+
+module_param(BZDG_BATCH_NUM, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(BZDG_BATCH_NUM, "Number of packet batching.");
+
 /*
  * Name: bzdg_slot
  * Description:
