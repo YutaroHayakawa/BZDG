@@ -11,3 +11,5 @@ BZDG realize better performance than existing socket framework by following solu
 Currently, Zerocopy and Preallocation method is not impremented.
 
 But, in the 1GB data transfer benchmarks, BZDG realize about 40% performance improvement in the best case(512byte/packet and 80 batch).
+
+For more details, please see benchmarks/1GB_data_transfer/results.csv.
