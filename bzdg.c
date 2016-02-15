@@ -32,14 +32,10 @@
 #include "kmod.h"
 #include "bzdg_common.h"
 
-/*
- * Name: build_skb_struct;
- * Description: This memory layout is needed in build_skb function.
- */
-struct build_skb_struct {
-    char data[BZDG_BUFFER_SIZE];
-    struct skb_shared_info shinfo;
-};
+static int BZDG_BATCH_NUM = 8;
+
+module_param(BZDG_BATCH_NUM, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(BZDG_BATCH_NUM, "Number of packet batching.");
 
 /*
  * Name: bzdg_slot
@@ -57,7 +53,7 @@ struct bzdg_slot {
     struct sockaddr_in addr;
     struct kvec vec;
     char msgctl_area[BZDG_OPTMEM_MAX];
-    struct build_skb_struct bskb;
+    char data[BZDG_BUFFER_SIZE];
 };
 
 
@@ -68,7 +64,6 @@ struct bzdg_slot {
 struct bzdg_info {
     struct bzdg_slot *shmem;
     int shmem_size;
-    struct sk_buff *skbs[BZDG_BATCH_NUM];
     struct socket *sock;
 };
 
@@ -86,7 +81,7 @@ struct bzdg_info {
  */
 static int bzdg_open(struct inode *inode, struct file *file)
 {
-    int i, err;
+    int err;
     struct socket *sock;
     struct bzdg_info *info;
 
@@ -104,22 +99,9 @@ static int bzdg_open(struct inode *inode, struct file *file)
     /* Keep socket object reference in file object.*/
     info->sock = sock;
 
-    for(i=0; i<BZDG_BATCH_NUM; i++) {
-        info->skbs[i] = NULL;
-    }
-
     info->shmem = NULL;
 
     return 0;
-}
-
-void bzdg_build_skbs(struct bzdg_info *info, int num) {
-    int i;
-
-    for(i=0; i<num; i++) {
-        info->skbs[i] = build_skb(&(info->shmem[i].bskb), sizeof(struct build_skb_struct));
-        KMODD("info->skbs[%d] <%p>", i, info->skbs[i]);
-    }
 }
 
 /*
@@ -157,43 +139,26 @@ static int bzdg_mmap(struct file *filp, struct vm_area_struct *vma)
         return err;
     }
 
+    KMODD("size of shared memory : %ld", size);
+
     info->shmem = (struct bzdg_slot *)field;
     info->shmem_size = size;
-
-    /*
-     * Execute build_skb and get reference.
-     */
-    bzdg_build_skbs(info, BZDG_BATCH_NUM);
 
     return 0;
 }
 
-void bzdg_reset_skb(struct bzdg_info *info, struct sk_buff *skb, int index) {
-    skb_orphan(skb);
-    skb->head = info->shmem[index].bskb.data;
-    skb->data = info->shmem[index].bskb.data;
-    skb->tail = 0;
-    skb->len = 0;
-    skb_reset_transport_header(skb);
-    skb_reset_network_header(skb);
-    skb_reset_mac_header(skb);
-}
-
+/*
 void dump_slot(struct bzdg_slot slot) {
     KMODD("slot <%p>", &slot);
-    KMODD("data %s", slot.bskb.data);
-    /*
-    KMODD("msg : msg_name <%p>, msg_namelen %d, msg_iov <%p>, msg_iovlen %d", slot->msg.msg_name, slot->msg.msg_namelen, slot->msg.msg_iov, slot->msg.msg_iovlen);
-    KMODD("vec : iov_base <%p>, iov_len %d", slot->vec.iov_base, slot->vec.iov_len);
-    */
+    KMODD("msg : msg_name <%p>, msg_namelen %d, msg_iov <%p>, msg_iovlen %d", slot.msg.msg_name, slot.msg.msg_namelen, slot.msg.msg_iov, slot.msg.msg_iovlen);
+    KMODD("vec : iov_base <%p>, iov_len %d", slot.vec.iov_base, slot.vec.iov_len);
 }
+*/
 
 long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
 {
     int i, err;
     struct sockaddr_in addr;
-    struct sk_buff *skb = NULL;
-    struct socket *sock = NULL;
     struct bzdg_info *info = NULL;
 
     info = filp->private_data;
@@ -214,6 +179,7 @@ long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
          */
         case BZDG_CONNECT:
             err = copy_from_user(&addr, (struct sockaddr*)data, sizeof(struct sockaddr));
+
             if(err != 0) {
                 KMODD("Copy of sockaddr data from user space failed.");
                 return -EINVAL;
@@ -231,59 +197,35 @@ long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
         case BZDG_BIND:
             err = copy_from_user(&addr, (struct sockaddr*)data, sizeof(struct sockaddr));
 
-            if(err != 0) {
+            if(err) {
                 KMODD("Copy of sockaddr data from user space failed.");
-                return -EINVAL;
+                return err;
             }
 
             err = kernel_bind(info->sock, (struct sockaddr *)&addr, sizeof(struct sockaddr));
 
-            if(err != 0) {
+            if(err) {
                 KMODD("kernel_bind() failed.");
-                return -EINVAL;
+                return err;
             }
 
             break; 
 
         case BZDG_SEND:
+            err = 0;
+
             for(i=0; i<BZDG_BATCH_NUM; i++) {
                 if(!info->shmem[i].is_available) {
                     continue;
                 }
-
-                dump_slot(info->shmem[i]);
-
-                skb = info->skbs[i];
-
-                if(!skb) {
-                    return -EINVAL;
-                }
-
-                skb_reserve(skb, BZDG_HEAD_ROOM);
-                skb_put(skb, info->shmem[i].vec.iov_len);
-
-                sock = info->sock;
-                sock->sk->sk_user_data = skb;
-
-                skb_get(skb);
-                err = sock_sendmsg(sock, &(info->shmem[i].msg));
-                KMODD("%d", err);
-                KMODD("skb<%p> refcount %d", skb, atomic_read(&skb->users));
-
-                bzdg_reset_skb(info, skb, i);
-                KMODD("skb<%p> refcount %d", skb, atomic_read(&skb->users));
+                err = kernel_sendmsg(info->sock, &(info->shmem[i].msg), &(info->shmem[i].vec), 1, info->shmem[i].vec.iov_len);
                 info->shmem[i].is_available = 0;
             }
 
-            break;
+            return err;
 
         case BZDG_GET_BATCH_NUM:
             return BZDG_BATCH_NUM;
-
-        case BZDG_DBG:
-            memset(info->shmem[0].bskb.data, 0, BZDG_BUFFER_SIZE);
-            strcpy(info->shmem[0].bskb.data, "hogehoge");
-            break;
 
         default:
             KMODD("Invalid argument.");
@@ -295,24 +237,17 @@ long bzdg_ioctl(struct file *filp, u_int cmd, u_long data)
 
 static int bzdg_release(struct inode *inode, struct file *filp)
 {
-		int i;
     struct bzdg_info *info = filp->private_data;
-    KMODD("bzdg_release");
 
-    /*
-    for(i=0; i<BZDG_BATCH_NUM; i++) {
-      bzdg_kfree_skbmem(info->skbs[i]);
-    }
-    */
-
-    /*
     if(info->sock) {
-	    sock_release(info->sock);
+        KMODD("release socket at <%p>", info->sock);
+        sock_release(info->sock);
     }
-    */
-	  
+
     //free_pages((unsigned long) info->shmem, info->shmem_size);
-    //kfree(info);
+
+    kfree((struct bzdg_info *)filp->private_data);
+
     return 0;
 }
 

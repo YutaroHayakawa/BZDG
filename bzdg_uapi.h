@@ -60,7 +60,7 @@ int bzdg_get_batch_num(BZDG *bzdg) {
     return bzdg->batch_num;
 }
 
-struct msghdr *bzdg_get_tx_msghdr(BZDG *bzdg, int index) {
+struct kernel_msghdr *bzdg_get_tx_msghdr(BZDG *bzdg, int index) {
     return &(bzdg->shmem[index].msg);
 }
 
@@ -74,7 +74,7 @@ struct iovec *bzdg_get_tx_iovec(BZDG *bzdg, int index) {
 
 /* TODO BZDG_HEAD_ROOM should not be a macro.*/
 char *bzdg_get_tx_data_buffer(BZDG *bzdg, int index) {
-    return bzdg->shmem[index].data + BZDG_HEAD_ROOM;
+    return bzdg->shmem[index].data;
 }
 
 char *bzdg_get_tx_msgctl_area(BZDG *bzdg, int index) {
